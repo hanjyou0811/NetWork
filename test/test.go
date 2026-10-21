@@ -42,7 +42,10 @@ func dummy_init() *network.NetDevice {
 func setup() int {
 	signal.Notify(signalCh, os.Interrupt)
 	fmt.Fprintln(os.Stderr, "setup protocol stack...")
-	// Net_init は未実装のため、ここではデバイスの初期化から行う。
+	if network.Net_init() == -1 {
+		fmt.Fprintln(os.Stderr, "Net_init() failure")
+		return -1
+	}
 	dev = driver.Loopback_init()
 	if dev == nil {
 		fmt.Fprintln(os.Stderr, "loopback_init() failure")
@@ -69,7 +72,7 @@ func app_main() int {
 			return 0
 		default:
 		}
-		if network.Net_device_output(dev, 0x0800, test_data) == -1 {
+		if network.Net_device_output(dev, network.NET_PROTOCOL_TYPE_IP, test_data) == -1 {
 			fmt.Fprintf(os.Stderr, "failed to send data\n")
 			return 1
 		}

@@ -16,6 +16,10 @@ const NET_DEVICE_FLAG_BROADCAST = 0x0020
 const NET_DEVICE_FLAG_P2P = 0x0040
 const NET_DEVICE_FLAG_NEED_ARP = 0x0100
 
+const NET_PROTOCOL_TYPE_IP = 0x0800
+const NET_PROTOCOL_TYPE_ARP = 0x0806
+const NET_PROTOCOL_TYPE_IPV6 = 0x86DD
+
 type NetDevice struct {
 	index     uint
 	Name      string
@@ -37,6 +41,16 @@ type NetDeviceOps struct {
 }
 
 var Devices []*NetDevice
+
+type NetProtocol struct {
+	Name    string
+	Type    uint16
+	Handler NetProtocolHandler
+}
+
+var Protocols []*NetProtocol
+
+type NetProtocolHandler func(data []byte, dev *NetDevice)
 
 func NewNetDevice(name string, typeid uint16, mtu uint, hlen uint16, alen uint16) *NetDevice {
 	return &NetDevice{
@@ -157,5 +171,44 @@ func Net_device_output(device *NetDevice, typeid uint16, data []uint8) int {
 func Net_input(device *NetDevice, typeid uint16, data []uint8) int {
 	fmt.Fprintf(os.Stderr, "dev=%s, type=0x%04x, len=%d\n", device.Name, typeid, len(data))
 	Debugdump(data)
+	for _, proto := range Protocols {
+		if typeid == proto.Type {
+			proto.Handler(data, device)
+			return 0
+		}
+	}
+	return 0
+}
+
+func Net_protocol_register(name string, typeid uint16, handler NetProtocolHandler) int {
+	for _, proto := range Protocols {
+		if typeid == proto.Type {
+			fmt.Fprintf(
+				os.Stderr,
+				"already registered, type=%s(0x%04x), exist=%s(0x%04x)\n",
+				name, typeid, proto.Name, proto.Type,
+			)
+			return -1
+		}
+	}
+
+	proto := &NetProtocol{
+		Name:    name,
+		Type:    typeid,
+		Handler: handler,
+	}
+	Protocols = append(Protocols, proto)
+
+	fmt.Printf("registered, type=%s(0x%04x)\n", proto.Name, typeid)
+	return 0
+}
+
+func Net_init() int {
+	fmt.Println("initialize network stack ...")
+	if ip_init() == -1 {
+		fmt.Fprintln(os.Stderr, "failed to initialize IP protocol")
+		return -1
+	}
+	fmt.Println("success")
 	return 0
 }
