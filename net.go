@@ -17,15 +17,23 @@ const NET_DEVICE_FLAG_P2P = 0x0040
 const NET_DEVICE_FLAG_NEED_ARP = 0x0100
 
 type NetDevice struct {
-	index    uint
-	Name     string
-	typeid   uint16
-	mtu      uint
-	flags    uint16
-	hlen     uint16
-	alen     uint16
-	addr     []uint8
-	broadcat []uint8
+	index     uint
+	Name      string
+	typeid    uint16
+	mtu       uint
+	Flags     uint16
+	hlen      uint16
+	alen      uint16
+	addr      []uint8
+	broadcast []uint8
+	Ops       *NetDeviceOps
+	Private   interface{}
+}
+
+type NetDeviceOps struct {
+	Open   func(device *NetDevice) int
+	Close  func(device *NetDevice) int
+	Output func(device *NetDevice, typeid uint16, data []uint8) int
 }
 
 var Devices []*NetDevice
@@ -41,7 +49,7 @@ func NewNetDevice(name string, typeid uint16, mtu uint, hlen uint16, alen uint16
 }
 
 func net_device_is_up(device *NetDevice) bool {
-	return device.flags&NET_DEVICE_FLAG_UP == 1
+	return device.Flags&NET_DEVICE_FLAG_UP == 1
 }
 
 func Net_device_register(device *NetDevice) int {
@@ -55,7 +63,7 @@ func net_device_open(device *NetDevice) int {
 		fmt.Fprintf(os.Stderr, "already opened, dev=%s\n", device.Name)
 		return -1
 	}
-	device.flags |= NET_DEVICE_FLAG_UP
+	device.Flags |= NET_DEVICE_FLAG_UP
 	return 0
 }
 
@@ -65,7 +73,7 @@ func net_device_close(device *NetDevice) int {
 		fmt.Fprintf(os.Stderr, "not opened,%s", device.Name)
 		return -1
 	}
-	device.flags &= ^uint16(NET_DEVICE_FLAG_UP)
+	device.Flags &= ^uint16(NET_DEVICE_FLAG_UP)
 	return 0
 }
 
@@ -89,14 +97,46 @@ func net_shutdown() int {
 	return 0
 }
 
-func debugdump(data []uint8) {
+func Debugdump(data []uint8) {
 	fmt.Print(hex.Dump(data))
+}
+
+func Net_device_input(device *NetDevice) int {
+	fmt.Fprintf(os.Stderr, "dev=%s\n", device.Name)
+	if !net_device_is_up(device) {
+		fmt.Fprintf(os.Stderr, "not opened, dev=%s\n", device.Name)
+		return -1
+	}
+	if device.Ops != nil && device.Ops.Open != nil {
+		if device.Ops.Open(device) != 0 {
+			fmt.Fprintf(os.Stderr, "failed to open device, dev=%s\n", device.Name)
+			return -1
+		}
+	}
+	device.Flags &^= uint16(NET_DEVICE_FLAG_UP)
+	return 0
+}
+
+func Net_device_close(device *NetDevice) int {
+	fmt.Fprintf(os.Stderr, "dev=%s\n", device.Name)
+	if !net_device_is_up(device) {
+		fmt.Fprintf(os.Stderr, "not opened, dev=%s\n", device.Name)
+		return -1
+	}
+	if device.Ops != nil && device.Ops.Close != nil {
+		if device.Ops.Close(device) != 0 {
+			fmt.Fprintf(os.Stderr, "failed to close device, dev=%s\n", device.Name)
+			return -1
+		}
+	}
+	device.Flags &^= uint16(NET_DEVICE_FLAG_UP)
+	return 0
 }
 
 func Net_device_output(device *NetDevice, typeid uint16, data []uint8) int {
 	length := len(data)
 	fmt.Fprintf(os.Stderr, "dev=%s, type=0x%04x, len=%d\n", device.Name, typeid, length)
-	debugdump(data)
+	Debugdump(data)
 	if !net_device_is_up(device) {
 		fmt.Fprintf(os.Stderr, "not opened, dev=%s\n", device.Name)
 		return -1
@@ -105,5 +145,17 @@ func Net_device_output(device *NetDevice, typeid uint16, data []uint8) int {
 		fmt.Fprintf(os.Stderr, "too long, dev=%s, mtu=%d, len=%d\n", device.Name, device.mtu, length)
 		return -1
 	}
+	if device.Ops != nil && device.Ops.Output != nil {
+		if device.Ops.Output(device, typeid, data) != 0 {
+			fmt.Fprintf(os.Stderr, "failed to output data, dev=%s\n", device.Name)
+			return -1
+		}
+	}
+	return 0
+}
+
+func Net_input(device *NetDevice, typeid uint16, data []uint8) int {
+	fmt.Fprintf(os.Stderr, "dev=%s, type=0x%04x, len=%d\n", device.Name, typeid, len(data))
+	Debugdump(data)
 	return 0
 }
